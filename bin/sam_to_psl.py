@@ -89,7 +89,10 @@ with open(outfilename, 'wt') as outfile:
 				tbaseinsert += num
 				tnuminsert += 1
 				qsize_backup += num
+			elif op == 'H' or op == 'S':
+				break
 			else:
+				sys.stderr.write(cigar+'\n')
 				sys.stderr.write(op + ' unrecognized\n')
 				sys.exit(1)
 
