@@ -243,6 +243,9 @@ panel.set_ylabel('Percent Usage', fontsize=12)
 # plt.savefig(genename+'_proportion.pdf', transparent=True, dpi=600)  # uncomment to output as pdf
 plt.savefig(outfilebase+'_usage.png', dpi=600)
 
+psl.close()
+psl = open(sys.argv[1])
+
 # isoform structures
 fig_0 = plt.figure(figsize=(9, 3))
 
