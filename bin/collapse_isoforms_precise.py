@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import sys, csv, argparse, math, os
 from multiprocessing import Pool
 
@@ -64,8 +66,8 @@ def get_junctions(line):
 
 def get_junctions_bed12(line):
 	chrstart = int(line[1])
-	starts = [int(n) + chrstart for n in line[11].split(',')[:-1]]
-	sizes = [int(n) for n in line[10].split(',')[:-1]]
+	starts = [int(n) + chrstart + 1 for n in line[11].split(',')[:-1]]
+	sizes = [int(n) - 1 for n in line[10].split(',')[:-1]]
 	if len(starts) == 1:
 		return 0, 0
 	junctions = set()
@@ -303,7 +305,7 @@ def find_tsss(sites, total, finding_tss=True, max_results=2, chrom='', junccoord
 		if annotends and chrom in annotends:  # args.f supplied
 			for t in range(bestsite[0]-window, bestsite[0]+window):
 				if t in annotends[chrom] and abs(t - bestsite[0]) < abs(closest_annotated - bestsite[0]) and \
-					(junccoord and (finding_tss and t <= junccoord[0] or not finding_tss and t >= junccoord[1])):
+					(junccoord and (finding_tss and t < junccoord[0] or not finding_tss and t > junccoord[1])):
 					closest_annotated = t
 		if closest_annotated < 1e15:
 			if len(found_tss) >= max_results:

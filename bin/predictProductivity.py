@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from __future__ import print_function
 
 
@@ -51,7 +52,7 @@ class CommandLine(object) :
                                              epilog = 'Please feel free to forward any questions/concerns to /dev/null', 
                                              add_help = True, #default is True 
                                              prefix_chars = '-', 
-                                             usage = '%(prog)s -i isoforms.bed -f isoforms.fa -g annotations.gtf')
+                                             usage = '%(prog)s -i isoforms.bed -f genome.fa -g annotations.gtf')
         # Add args
         self.parser.add_argument('-i', "--input_isoforms", action = 'store', required=True, help='Input collapsed isoforms in psl or bed12 format.')
         self.parser.add_argument('-g', "--gtf", action = 'store', required=True, help='Gencode annotation file.')
@@ -83,9 +84,8 @@ class Isoform(object) :
     
     ''' 
 
-    def __init__(self, tid=None, gid=None, seq=None):
-        self.tid = tid
-        self.gid = gid
+    def __init__(self, name=None, seq=None):
+        self.name = name
         self.pro = "UNK"
         self.chrom = ""
 
@@ -128,9 +128,28 @@ def getStarts(gtf):
            
     return starts
 
+def split_iso_gene(iso_gene):
+    if '_chr' in iso_gene:
+        splitchar = '_chr'
+    elif '_XM' in iso_gene:
+        splitchar = '_XM'
+    elif '_XR' in iso_gene:
+        splitchar = '_XR'
+    elif '_NM' in iso_gene:
+        splitchar = '_NM'
+    elif '_NR' in iso_gene:
+        splitchar = '_NR'
+    elif '_R2_' in iso_gene:
+        splitchar = '_R2_'
+    elif '_NC_' in iso_gene:
+        splitchar = '_NC_'
+    else:
+        splitchar = '_'
+    iso = iso_gene[:iso_gene.rfind(splitchar)]
+    gene = iso_gene[iso_gene.rfind(splitchar)+1:]
+    return iso, gene
 
 def getSeqs(bed, genome):
-
 
     isoDict = dict()
     bt = pybedtools.BedTool(bed)
@@ -138,11 +157,10 @@ def getSeqs(bed, genome):
     with open(bt.seqfn) as entries:
         for entry in entries:
             read,seq  = entry.split()
-
-            iso = read[:read.rfind('_')]
-            gene = read[read.rfind('_')+1:]
+            read = read.split("(")[0]
+            
             if read not in isoDict:
-                isoDict[read] = Isoform(iso,gene,seq)
+                isoDict[read] = Isoform(read,seq)
     return isoDict
 
 
@@ -235,7 +253,6 @@ def predict(bed, starts, isoDict):
         isoDict[read].strand = intersection[5]
         isoDict[read].chrom = intersection[0]
         isoDict[read].exons.add(exonCoord)
-
         if overlap != "3":
             continue
         else:
@@ -313,18 +330,19 @@ def main():
         elif status:
             sys.stderr.write('bin/psl_to_bed.py did not exit with success status\n')
             sys.exit(1)
-        bed = bed+'.bed'
+        else:
+            bed = bed+'.bed'
 
     starts      = getStarts(gtf)
     isoformObjs = getSeqs(bed, genome)
     isoformObjs = predict(bed, starts, isoformObjs)
+
 
     beaut = {"PRO":"103,169,207", "PTC":"239,138,98", "NST":"0,0,0","NGO":"0,0,0"}
 
     with open(bed) as lines:
         for line in lines:
             bedCols = line.rstrip().split()
-
             isoObj = isoformObjs[bedCols[3]]
             
             if defineORF == 'longest':
@@ -337,7 +355,8 @@ def main():
             if extra_col:
                 bedCols += [pro]
             else:
-                bedCols[3] = "%s_%s" % (bedCols[3], pro)
+                iso, gene = split_iso_gene(bedCols[3])
+                bedCols[3] = "%s_%s_%s" % (iso, pro, gene)
 
 
             bedCols[8] = beaut[pro]
@@ -347,7 +366,7 @@ def main():
                 bedCols[7],bedCols[6] = str(start),str(end)
             print("\t".join(bedCols))
     if is_psl:
-        subprocess.call(['rm', bed+'.bed'])
+        subprocess.call(['rm', bed])
 
 if __name__ == "__main__":
     main()

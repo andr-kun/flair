@@ -14,6 +14,7 @@ FLAIR (Full-Length Alternative Isoform analysis of RNA) for the correction, isof
 	- [diffExp](#diffExp)
 	- [diffSplice](#diffSplice)
 - [Scripts](#scripts)
+- [Other ways to run FLAIR](#otherways)
 - [Docker](#docker)
 - [Conda environment](#condaenv)
 - [Example Files](#exfiles)
@@ -24,7 +25,7 @@ FLAIR can be run optionally with short-read data to help increase splice site ac
 
 <img src='https://people.ucsc.edu/~atang14/flair/flair_workflow_compartmentalized.png' alt='flair workflow' width='680'/>
 
-It is recommended to combine all samples together prior to running flair-collapse for isoform assembly by concatenating corrected read `psl` files together. Following the creation of an isoform reference from flair-collapse, consequent steps will assign reads from each sample individually to isoforms of the combined assembly for downstream analyses.
+It is recommended to combine all samples together prior to running flair-collapse for isoform assembly by concatenating corrected read `psl` or `bed` files together. Following the creation of an isoform reference from flair-collapse, consequent steps will assign reads from each sample individually to isoforms of the combined assembly for downstream analyses.
 
 It is also good to note that `bed12` and `PSL` can be converted using [kentUtils](https://github.com/ENCODE-DCC/kentUtils/tree/master/src/hg/utils) bedToPsl or pslToBed, or using `bin/bed_to_psl.py` and `bin/psl_to_bed.py`.
 
@@ -49,14 +50,14 @@ python flair.py align -g genome.fa -r <reads.fq>|<reads.fa> [options]
 run with `--help` for a description of optional arguments. Outputs (1) `sam` of raw aligned reads and (2) smoothed `bed12` file of aligned reads to be supplied to flair-correct.
 
 ### <a name="correct"></a>flair correct
-Corrects misaligned splice sites using genome annotations and/or short-read splice junctions. Based on common user issues we have encountered, for flair-correct to run properly, please ensure/note that (1) the genome annotation and genome sequences are compatible, (2) `gtf` is preferred over `gff` for annotation and annotations that do not split single exons into multiple entries are ideal, (3) Bedtools is in your $PATH, and (4) kerneltree is properly installed (you may need to install Cython first). You may also want to refer to the [installation requirements](#requirements) or using the [conda environment](#condaenv) for flair.
+Corrects misaligned splice sites using genome annotations and/or short-read splice junctions. Based on common user issues we have encountered, for flair-correct to run properly, please ensure/note that (1) the genome annotation and genome sequences are compatible, (2) `gtf` is preferred over `gff` for annotation and annotations that do not split single exons into multiple entries are ideal, (3) Bedtools is in your $PATH, and (4) kerneltree is properly installed (you may need to install Cython first). You may also want to refer to the [installation requirements](#requirements) and/or use the [conda environment](#condaenv) for flair.
 
 **Usage:**
 ```sh
-python flair.py correct -c chromsizes -q query.bed12 -g genome.fa [options]
+python flair.py correct -q query.bed12 -g genome.fa [options]
 ```
 run with `--help` for description of optional arguments.
-Outputs (1) `bed12` of corrected reads, (2) `bed12` of reads that weren't able to be corrected, (3) `psl` of corrected reads to be supplied in flair-collapse.
+Outputs (1) `bed12` of corrected reads, (2) `bed12` of reads that weren't able to be corrected, (3) `psl` of corrected reads if the -c chromsizes file is provided. Either (1) or (3) can be supplied to flair-collapse as the query.
 
 #### <a name="short"></a>Short-read junctions
 To use short-read splice sites to aid with correction, one option is `bin/junctions_from_sam.py` to extract splice junctions from short-read alignments. The `-s` option accepts either `sam` or `bam` files, and if there are multiple sams/bams they can be provided in a comma-separated list.
@@ -65,22 +66,23 @@ To use short-read splice sites to aid with correction, one option is `bin/juncti
 ```sh
 python junctions_from_sam.py -s <shortreads.sam>|<shortreads.bam> -n outname
 ```
-the file that can be supplied to flair-correct with `-j` is in the output file `outname_junctions.bed`. It is recommended that the user remove infrequently used junctions i.e. junctions with few supporting junction reads, which are in the 5th column of the junction bed file.
+The file that can be supplied to flair-correct with `-j` is in the output file `outname_junctions.bed`. It is recommended that the user remove infrequently used junctions i.e. junctions with few supporting junction reads, which are in the 5th column of the junction bed file. For example, if you wanted to do the filter out junctions with fewer than 3 supporting short reads, you could use `awk '{ if ($5 > 2) { print } }' outname.sj_junctions.bed > outname.filtered.bed`.
 
-Alternatively, the `-j` argument for flair-correct can also be generated using STAR. STAR 2-pass alignment of short reads produces a compatible splice junction file (`SJ.out.tab`). We recommend filtering out junctions with few uniquely mapping reads (column 7).
+Alternatively, the `-j` argument for flair-correct can also be generated using STAR. STAR 2-pass alignment of short reads automatically produces a compatible splice junction file (`SJ.out.tab`). We recommend filtering out junctions with few uniquely mapping reads (column 7).
 
 
 ### <a name="collapse"></a>flair collapse
-Defines high-confidence isoforms from corrected reads. As FLAIR does not use annotations to collapse isoforms, FLAIR will pick the name of a read that shares the same splice junction chain as the isoform to be the isoform name. It is recommended to still provide an annotation with `-f`, which is used to rename FLAIR isoforms that match isoforms in existing annotation according to the transcript_id field in the gtf. Similar isoform names ending with `-1` or more have identical splice junction chains and differ only by their TSS/TES. 
+Defines high-confidence isoforms from corrected reads. As FLAIR does not use annotations to collapse isoforms, FLAIR will pick the name of a read that shares the same splice junction chain as the isoform to be the isoform name. It is recommended to still provide an annotation with `-f`, which is used to rename FLAIR isoforms that match isoforms in existing annotation according to the transcript_id field in the gtf. Intermediate files generated by this step are removed by default, but can be retained for debugging purposes by supplying the argument `--keep_intermediate` and optionally supplying a directory to keep those files with `--temp_dir`.
 
 If there are multiple samples to be compared, the flair-corrected read `psl` files should be concatenated prior to running flair-collapse. In addition, all raw read fastq/fasta files should either be specified after `-r` with space/comma separators or concatenated into a single file.
 
 **Usage:**
 ```sh
-python flair.py collapse -g genome.fa -r <reads.fq>|<reads.fa> -q query.psl [options]
+python flair.py collapse -g genome.fa -r <reads.fq>|<reads.fa> -q <query.psl>|<query.bed> [options]
 ```
 run with `--help` for description of optional arguments.
-Outputs the high-confidence isoforms in several formats: (1) `*isoforms.psl`, (2) `*isoforms.gtf`, as well as (3) an `*isoforms.fa` file of isoform sequences. Intermediate files are removed, but can be output for debugging purposes by supplying the argument `--keep_intermediate`.
+
+Outputs the high-confidence isoforms in several formats: (1) `*isoforms.psl` or `.bed`, (2) `*isoforms.gtf`, as well as (3) an `*isoforms.fa` file of isoform sequences. If an annotation file is provided, the isoforms ID format will contain the transcript id, underscore, and then the gene id, so it would look like `ENST*_ENSG*` if you're working with the GENCODE human annotation. If multiple TSSs/TESs are allowed (toggle with `--max_ends` or `--no_redundant`), then a `-1` or higher will be appended to the end of the isoform name for the isoforms that have identical splice junction chains and differ only by their TSS/TES. For the gene field, the gene that is assigned to the isoform is based on whichever annotated gene has the greatest number of splice junctions shared with the isoform. If there are no genes in the annotation which can be assigned to the isoform, a genomic coordinate is used (e.g. `chr*:100000`).
 
 ### <a name="quantify"></a>flair quantify
 Convenience function to quantifying FLAIR isoform usage across samples using minimap2. If isoform quantification in TPM is desired, please use the `--tpm` option. If the user prefers [salmon](https://combine-lab.github.io/salmon/getting_started/) to quantify transcripts using their nanopore reads, please specify a path to salmon using `--salmon`. For all options run flair-quantify with `--help`.
@@ -91,7 +93,7 @@ python flair.py quantify -r reads_manifest.tsv -i isoforms.fasta [options]
 ```
 
 **Inputs:**</br>
-(1) `reads_manifest.tsv` is a tab-delimited file containing sample_name, condition, batch\*, and path to reads.fq/fa.
+(1) `reads_manifest.tsv` is a tab-delimited file containing the sample name, condition, batch\*, and path to reads.fq/fa.
 For exmaple:
 ```tsv
 sample1	conditionA	batch1	./sample1_reads.fq
@@ -106,13 +108,14 @@ sample6	conditionB	batch2	./sample6_reads.fq
 (2) `isoforms.fasta` contains FLAIR collapsed isoforms produced by the [`flair-collapse`](#collapse) module.
 
 **Outputs:**</br>
-(1) `count_matrix.tsv` which is a tab-delimited file containing isoform counts for each sample. For example:
+(1) `counts_matrix.tsv` which is a tab-delimited file containing isoform counts for each sample. In the output, the values in the manifest file are concatenated with underscores so please do not use underscores in the manifest file. For example:
 
 ```tsv
 ids	samp1_conditionA_batch1	samp2_conditionA_batch1 samp3_conditionA_batch2	...
 0042c9e7-b993_ENSG00000131368.3	237.0	156.0	165.0	150.0	...
 0042d216-6b08_ENSG00000101940.13	32.0	14.0 	25.0	...
 ```
+
 
 ### <a name="diffExp"></a>flair diffExp
 Performs differential isoform expression, differential gene expression, and differential isoform usage analyses between multiple samples with 3 or more replicates. For differential isoform usage analysis between samples without replicates, please use the [diff_iso_usage.py](#diffisoscript) standalone script. This module requires additional python modules and R packages which are described below: 
@@ -127,30 +130,32 @@ Performs differential isoform expression, differential gene expression, and diff
 
 **Usage:**
 ```sh
-python flair.py diffExp -q count_matrix.tsv -o output_directory [options]
+python flair.py diffExp -q counts_matrix.tsv -o output_directory [options]
 ```
 
 **Inputs:**</br>
-(1) `count_matrix.tsv` is a tab-delimited file generated by the [`flair-quantify`](#quantify) module.
+(1) `counts_matrix.tsv` is a tab-delimited file generated by the [`flair-quantify`](#quantify) module.
 
 **Outputs:**</br>
-(1) Files contained in the `output_directory` are tables and plots generated from the various R-packages used in this analysis, including raw deseq2/drimseq output tables with foldChange, isoform frequency and adjusted pvalues. 
+(1) Files contained in the `output_directory` are tables and plots generated from the various R-packages used in this analysis, including raw DESeq2/DRIMSeq output tables with foldChange, isoform frequency and adjusted pvalues. 
 
 
 ### <a name="diffsplice"></a>flair diffSplice
-Calls alternative splicing events from isoforms. Currently we support the following AS events: intron retention, alternative 3' splicing, alternative 5' splicing, and cassette exons. Note: This module is still in beta testing.
+Calls alternative splicing events from isoforms. Currently we support the following AS events: intron retention, alternative 3' splicing, alternative 5' splicing, and cassette exons. 
 
 **Usage:**
 ```sh
-python flair.py diffSplice -i <isoforms.bed>|<isoforms.psl> -q count_matrix.tsv [options]
+python flair.py diffSplice -i <isoforms.bed>|<isoforms.psl> -q counts_matrix.tsv [options]
 ```
+If there are 3 or more samples per condition, then the user can run with `--test` and DRIMSeq will be used to calculate differential usage of the alternative splicing events between two conditions. Run with `--help` to see more DRIMSeq-specific arguments. If conditions were sequenced without replicates, then the flair-diffsplice output files can be input to the [diffsplice_fishers_exact.py](#diffsplice_fishers) script for statistical testing instead.
+
 
 **Inputs:**</br>
-(1) `-i` is a tab-delimited bed or psl file generated by the [`flair-collapse`](#collapse) module.<br>
-(2) `-q` is a tab-delimited file generated by the [`flair-quantify`](#quantify) module.
+(1) `-i` is a tab-delimited isoforms.bed/psl file generated by the [`flair-collapse`](#collapse) module.<br>
+(2) `-q` is a tab-delimited counts_matrix.tsv file generated by the [`flair-quantify`](#quantify) module.
 
 **Outputs:**</br>
-(1) Tab-delimited file for each AS event type. The output files can be input to the [DRIMSeq statistical framework](http://bioconductor.org/packages/release/bioc/vignettes/DRIMSeq/inst/doc/DRIMSeq.pdf) to identify the events that are significantly differentially used. If samples were sequenced without replicates, then the output files can be input to the [diffsplice_fishers_exact.py](#diffsplice_fishers) script for statistical testing instead.
+(1-4) 4 tab-delimited files for each AS event type. If DRIMSeq was run, and a file with PSIs for each sample and the corresponding p-values for each event type (5-8).
 
 For a complex splicing example, please note the 2 alternative 3' SS, 3 intron retention, and 4 exon skipping events in the following set of isoforms that flair-diffSplice would call and the isoforms that are considered to include or exclude the each event:</br>
 <img src='https://people.ucsc.edu/~atang14/flair/toy.isoforms.coord.png' alt='isoforms' width='780'/></br>
@@ -182,6 +187,17 @@ inclusion_chr1:400-500	chr1:400-500	75.0	35.0	...	e,a
 exclusion_chr1:400-500	chr1:400-500	56.0	15.0	...	f
 ```
 
+## <a name="otherways"></a>Other ways to run FLAIR modules
+For convenience, multiple FLAIR modules can be run in the same command. In place of a single module name, multiple module numbers can be specified (module numbers: align=1, correct=2, collapse=3, collapse-range=3.5, quantify=4, diffExp=5, diffSplice=6). All arguments for the modules that will be run must be provided. For example, to run the align, correct, and collapse modules, the command might look like:
+```sh
+python flair.py 123 -r reads.fa -g genome.fa -f annotation.gtf -o flair.output --temp_dir temp_flair [optional arguments]
+```
+
+A beta version of the collapse module, called collapse-range, has been developed. The corrected reads are divided into many independent regions, which are then subject to isoform calling separately and parallelized over the number of threads specified. This dramatically decreases the memory footprint of intermediate files and increases the speed in which the module runs without altering the final isoforms. This version can be invoked by specifying collapse-range as the module (or 3.5 if using numbers). An additional program, [bedPartition](http://hgdownload.cse.ucsc.edu/admin/exe/linux.x86_64/), needs to be in your $PATH.
+```sh
+python flair.py collapse-range -r reads.bam -q query.bed -g genome.fa -f annotation.gtf -o flair.output --temp_dir temp_flair [optional arguments]
+```
+ If the user would prefer not to use python's multiprocessing module, a bash script has also been provided (`bin/run_flair_collapse_ranges.sh`) that runs collapse-range for the user that parallelizes using GNU parallel, which the user can alter as they see fit for their system.
 
 ## <a name="scripts"></a>Scripts
 
@@ -195,7 +211,7 @@ Annotated start codons from the annotation are used to identify the longest ORF 
 ```sh
 python predictProductivity.py -i <isoforms.bed>|<isoforms.psl> -g annotation.gtf -f genome.fa --longestORF > productivity.bed
 ```
-Outputs a bed file with either the values `PRO` (productive), `PTC` (premature termination codon, i.e. unproductive), `NGO` (no start codon), or `NST` (has start codon but no stop codon) appended to the end of the isoform name. When isoforms are visualized in the UCSC genome browser or IGV, the isoforms will be colored accordingly and have thinner exons for the UTRs.
+Outputs a bed file with either the values `PRO` (productive), `PTC` (premature termination codon, i.e. unproductive), `NGO` (no start codon), or `NST` (has start codon but no stop codon) appended to the end of the isoform name. When isoforms are visualized in the UCSC genome browser or IGV, the isoforms will be colored accordingly and have thicker exons to denote the coding region.
 
 ### mark_intron_retention.py
 
@@ -208,21 +224,21 @@ python mark_intron_retention.py <isoforms.psl>|<isoforms.bed> out_isoforms.psl o
 Outputs (1) an extended `psl` with an additional column containing either values 0 or 1 classifying the isoform as either spliced or intron-retaining, respectively; (2) `txt` file of intron retentions with format `isoform name` `chromosome` `intron 5' coordinate` `intron 3' coordinate`. Note: A psl or bed file with more additional columns will not be displayed in the genome browser, but can be displayed in IGV.
 
 ### <a name="diffisoscript"></a>diff_iso_usage.py
-Requires four positional arguments to identify and calculate significance of alternative isoform usage between two samples using Fisher's exact tests: (1) count_matrix.tsv from flair-quantify, (2) the name of the column of the first sample, (3) the name of the column of the second sample, (4) `txt` output filename containing the p-value associated with differential isoform usage for each isoform. The more differentially used the isoforms are between the first and second condition, the lower the p-value.
+Requires four positional arguments to identify and calculate significance of alternative isoform usage between two samples using Fisher's exact tests: (1) counts_matrix.tsv from flair-quantify, (2) the name of the column of the first sample, (3) the name of the column of the second sample, (4) `txt` output filename containing the p-value associated with differential isoform usage for each isoform. The more differentially used the isoforms are between the first and second condition, the lower the p-value.
 
 **Usage:**
 ```sh
-python diff_iso_usage.py count_matrix.tsv colname1 colname2 diff_isos.txt
+python diff_iso_usage.py counts_matrix.tsv colname1 colname2 diff_isos.txt
 ```
 Output file format columns are as follows: 
 `gene name` `isoform name` `p-value` `sample1 isoform count` `sample2 isoform count` `sample1 alternative isoforms for gene count` `sample2 alternative isoforms for gene count` 
 
 ### plot_isoform_usage.py
-Visualization script for FLAIR isoform structures and the percent usage of each isoform in each sample for a given gene. If you supply the isoforms.bed file from running `predictProductivity.py`, then isoforms will be filled according to the predicted productivity. The gene name should correspond to a gene name in your isoform file and counts file.
+Visualization script for FLAIR isoform structures and the percent usage of each isoform in each sample for a given gene. If you supply the isoforms.bed file from running `predictProductivity.py`, then isoforms will be filled according to the predicted productivity (solid for `PRO`, hatched for `PTC`, faded for `NGO` or `NST`). The gene name supplied should correspond to a gene name in your isoform file and counts file.
 
 **Usage:**
 ```sh
-python plot_isoform_usage.py <isoforms.psl>|<isoforms.bed> count_matrix.tsv gene_name 
+python plot_isoform_usage.py <isoforms.psl>|<isoforms.bed> counts_matrix.tsv gene_name 
 ```
 
 Outputs (1) gene_name_isoforms.png of isoform structures and (2) gene_name_usage.png of isoform usage by sample. 
@@ -231,7 +247,6 @@ For example:
 
 <img src='https://people.ucsc.edu/~atang14/flair/toy_diu_isoforms.png' alt='isoforms' width='480'/></br>
 <img src='https://people.ucsc.edu/~atang14/flair/toy_diu_usage.png' alt='usage' width='480'/>
-
 
 ### <a name="diffsplice_fishers"></a>diffsplice_fishers_exact.py
 
@@ -264,8 +279,6 @@ Other downloads:
 - [NanoSim_Wrapper.py](https://github.com/BrooksLabUCSC/labtools/blob/master/NanoSim_Wrapper.py), a wrapper script written for simulating nanopore transcriptome data using [Nanosim](https://github.com/bcgsc/NanoSim)
 
 ## Cite FLAIR <a name="cite"></a>
-If you use or discuss FLAIR, please cite with the bioRxiv for now:
->Tang, A. D. et al. Full-length transcript characterization of SF3B1 mutation in chronic lymphocytic leukemia reveals downregulation of retained introns. 
->bioRxiv 410183 (2018). doi:10.1101/410183
-
+If you use or discuss FLAIR, please cite the following [paper](https://www.nature.com/articles/s41467-020-15171-6):
+>Tang, A.D., Soulette, C.M., van Baren, M.J. et al. Full-length transcript characterization of SF3B1 mutation in chronic lymphocytic leukemia reveals downregulation of retained introns. Nat Commun 11, 1438 (2020). https://doi.org/10.1038/s41467-020-15171-6
 

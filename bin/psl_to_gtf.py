@@ -1,65 +1,98 @@
-import sys, csv
+#!/usr/bin/env python3
+import sys, argparse
 
-try:
-	psl = open(sys.argv[1])
-	isbed = sys.argv[1][-3:].lower() != 'psl'
-	force = len(sys.argv) > 2 and 'force' in sys.argv[2]
-except:
-	sys.stderr.write('usage: script.py pslfile > outfile.gtf \n')
-	sys.stderr.write('Entry name must contain underscore-delimited transcriptid and geneid like so:\
-	 ENST00000318842.11_ENSG00000156313.12 or a4bab8a3-1d28_chr8:232000\n')
-	sys.exit(1)
+parser = argparse.ArgumentParser(description='options', \
+	usage='python script.py psl|bed [options] > outfile.gtf')
+parser.add_argument('psl', type=str, \
+	action='store', help='isoforms in psl or bed format')
+parser.add_argument('--force', action='store_true', dest='force', \
+	help='specify to not split isoform name by underscore into isoform and gene ids')
+args = parser.parse_args()
 
-for line in psl:
+def split_iso_gene(iso_gene):
+	if '_chr' in iso_gene:
+		iso = iso_gene[:iso_gene.rfind('_chr')]
+		gene = iso_gene[iso_gene.rfind('_chr')+1:]
+	elif '_XM' in iso_gene:
+		iso = iso_gene[:iso_gene.rfind('_XM')]
+		gene = iso_gene[iso_gene.rfind('_XM')+1:]
+	elif '_XR' in iso_gene:
+		iso = iso_gene[:iso_gene.rfind('_XR')]
+		gene = iso_gene[iso_gene.rfind('_XR')+1:]
+	elif '_NM' in iso_gene:
+		iso = iso_gene[:iso_gene.rfind('_NM')]
+		gene = iso_gene[iso_gene.rfind('_NM')+1:]
+	elif '_NR' in iso_gene:
+		iso = iso_gene[:iso_gene.rfind('_NR')]
+		gene = iso_gene[iso_gene.rfind('_NR')+1:]
+	elif '_R2_' in iso_gene:
+		iso = iso_gene[:iso_gene.rfind('_R2_')]
+		gene = iso_gene[iso_gene.rfind('_R2_')+1:]		
+	else:
+		iso = iso_gene[:iso_gene.rfind('_')]
+		gene = iso_gene[iso_gene.rfind('_')+1:]
+	return iso, gene
+
+isbed = args.psl[-3:].lower() != 'psl'
+for line in open(args.psl):
 	line = line.rstrip().split('\t')
 	if isbed:
 		start = int(line[1])
 		chrom, strand, score, name, start = line[0], line[5], line[4], line[3], int(line[1])
 		tstarts = [int(n) + start for n in line[11].split(',')[:-1]]
 		bsizes = [int(n) for n in line[10].split(',')[:-1]]
+		end, thick_start, thick_end = int(line[2]), int(line[6]), int(line[7])
 	else:
-		chrom, strand, score, name = line[13], line[8], line[0], line[9]
+		chrom, strand, score, name, start = line[13], line[8], line[0], line[9], int(line[15])
 		tstarts = [int(n) for n in line[20].split(',')[:-1]]  # target starts
 		bsizes = [int(n) for n in line[18].split(',')[:-1]]  # block sizes
 	
-	if '_' not in name and not force:
-		sys.stderr.write('No GTF conversion was done. Please run bin/identify_gene_isoform.py first\n')
+	if '_' not in name and not args.force:
+		sys.stderr.write('Entry name should contain underscore-delimited transcriptid and geneid like so:\
+		 ENST00000318842.11_ENSG00000156313.12 or a4bab8a3-1d28_chr8:232000\n')
+		sys.stderr.write('So no GTF conversion was done. Please run bin/identify_gene_isoform.py first\n')
 		sys.stderr.write('for best results, or run with --force\n')
 		sys.exit(1)
 
 	if ';' in name:
 		name = name.replace(';', ':')
 
-	transcript_id = name if '_' not in name else name[:name.rfind('_')]
-
-	if 'ENSG' in name:
-		gene_id = name[name.find('ENSG'):]
-	elif 'chr' in name:
-		gene_id = name[name.find('chr'):]
-	elif '_' in name:
-		gene_id = name[name.find('_')+1:]
-	else:  # force
-		gene_id = name
-	if '-' in gene_id:
-		transcript_flag = gene_id[gene_id.find('-'):]
-		if transcript_flag not in transcript_id[-3:]:
-			transcript_id += transcript_flag
-		gene_id = gene_id[:gene_id.find('-')]
+	if args.force:
+		transcript_id, gene_id = name, name
+	else:
+		transcript_id, gene_id = split_iso_gene(name)
 
 	endstring = 'gene_id \"{}\"; transcript_id \"{}\";'\
 				.format(gene_id, transcript_id)
-	# print('\t'.join([chrom, 'FLAIR', 'transcript', line[15], line[16], '.', strand, '.', \
-	# 	endstring]))
+	print('\t'.join([chrom, 'FLAIR', 'transcript', str(start+1), str(tstarts[-1]+bsizes[-1]), '.', strand, '.', \
+		endstring]))
+	if isbed and thick_start != thick_end and (thick_start != start or thick_end != end):
+		print('\t'.join([chrom, 'FLAIR', 'CDS', str(thick_start+1), str(thick_end), '.', strand, '.', \
+		endstring]))
+		if strand == '+':
+			print('\t'.join([chrom, 'FLAIR', 'start_codon', str(thick_start+1), str(thick_start+3), '.', strand, '.', \
+			endstring]))
+			print('\t'.join([chrom, 'FLAIR', '5UTR', str(start+1), str(thick_start+1), '.', strand, '.', \
+			endstring]))
+			print('\t'.join([chrom, 'FLAIR', '3UTR', str(thick_end), str(tstarts[-1]+bsizes[-1]), '.', strand, '.', \
+			endstring]))
+		elif strand == '-':
+			print('\t'.join([chrom, 'FLAIR', 'start_codon', str(thick_end-2), str(thick_end), '.', strand, '.', \
+			endstring]))
+			print('\t'.join([chrom, 'FLAIR', '3UTR', str(start+1), str(thick_start+1), '.', strand, '.', \
+			endstring]))
+			print('\t'.join([chrom, 'FLAIR', '5UTR', str(thick_end), str(tstarts[-1]+bsizes[-1]), '.', strand, '.', \
+			endstring]))
 	# if strand == '-':  # to list exons in 5'->3'
 	# 	for b in range(len(tstarts)):  # exon number
 	# 		bi = len(tstarts) - 1 - b  # block index
 	# 		endstring = 'gene_id \"{}\"; transcript_id \"{}\"; exon_number \"{}\";'\
 	# 						.format(gene_id, transcript_id, b)
 	# 		print('\t'.join([chrom, 'FLAIR', 'exon', str(tstarts[bi]+1), \
-	# 			str(tstarts[bi]+bsizes[bi]), '.', strand, str(score), endstring]))			
+	# 			str(tstarts[bi]+bsizes[bi]), '.', strand, '.', endstring]))			
 	# else:
 	for b in range(len(tstarts)):
 		endstring = 'gene_id \"{}\"; transcript_id \"{}\"; exon_number \"{}\";'\
 				.format(gene_id, transcript_id, b)
 		print('\t'.join([chrom, 'FLAIR', 'exon', str(tstarts[b]+1), \
-			str(tstarts[b]+bsizes[b]), '.', strand, str(score), endstring]))
+			str(tstarts[b]+bsizes[b]), '.', strand, '.', endstring]))

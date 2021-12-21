@@ -1,6 +1,9 @@
+#!/usr/bin/env python3
+
 import sys, argparse, re, csv, math, os
 from multiprocessing import Pool
 from collections import Counter
+from collections import namedtuple
 
 parser = argparse.ArgumentParser(description='for counting transcript abundances after aligning reads' +\
 			' to transcripts; for multiple mappers, only the best alignment for each read is used', \
@@ -13,7 +16,7 @@ required.add_argument('-o', '--output', default=0.25, type=str, required=True, a
 parser.add_argument('-i', '--isoforms', type=str, action='store', dest='isoforms', default='', \
 	help='specify isoforms.bed or .psl file if --stringent is specified')
 parser.add_argument('-w', '--window', type=int, action='store', dest='w', default=10, \
-	help='number of bases for determining which end is best match')
+	help='number of bases for determining which end is best match (10)')
 parser.add_argument('--stringent', default='', action='store_true', dest='stringent', \
 	help='only count if read alignment passes stringent criteria')
 parser.add_argument('-t', '--threads', default=4, type=int, action='store', dest='t', \
@@ -22,8 +25,10 @@ parser.add_argument('--quality', default=1, type=int, action='store', dest='qual
 	help='minimum quality threshold to consider if ends are to be trusted (1)')
 parser.add_argument('--trust_ends', default=False, action='store_true', dest='trust_ends', \
 	help='specify if reads are generated from a long read method with minimal fragmentation')
-args = parser.parse_args()
+parser.add_argument('--generate_map', default='', action='store', type=str, dest='generate_map', \
+	help='''specify an output path for a txt file of which isoform each read is assigned to''')
 
+args = parser.parse_args()
 try:
 	sam = open(args.sam)
 	outfilename = args.output
@@ -64,42 +69,54 @@ def is_stringent(tname, blocksizes, blockstarts):
 	return right_coverage and left_coverage and coverage > 0.8
 
 def count_transcripts_for_reads(read_names):
-	counts = {}
+	counts = {}  # isoform to counts
+	isoform_read = {}  # isoform and their supporting read ids 
 	for r in read_names:
 		transcripts = reads[r]  # all potential transcripts this read is assigned to
+
 		if not args.stringent and len(set(transcripts)) == 1:  # only one possible transcript
 			for t in transcripts:
-				if reads[r][t]['quality'] != 0:
+				quality = reads[r][t].mapq
+				if quality >= args.quality:  # if transcript passes mapq threshold
 					if t not in counts:
 						counts[t] = 0
 					counts[t] += 1
+					if args.generate_map:
+						if t not in isoform_read:
+							isoform_read[t] = []
+						isoform_read[t] += [r]
 					break
 			continue
 
-		ordered_transcripts = sorted(transcripts.items(), key=lambda x: transcripts[x[0]]['quality'])
-
-		# based on mapq, if the read aligns better to one transcript than the other candidates
-		if (not args.stringent and ordered_transcripts[-1][1]['quality'] > ordered_transcripts[-2][1]['quality'] \
-			and ordered_transcripts[-1][1]['quality'] > 7) or \
-			(not args.trust_ends and ordered_transcripts[-1][1]['quality'] > 0):
+		# based on sorted mapq, if the read aligns much better to one transcript than the other candidates
+		ordered_transcripts = sorted(transcripts.items(), key=lambda x: transcripts[x[0]].mapq)
+		if (not args.stringent and ordered_transcripts[-1][1].mapq > ordered_transcripts[-2][1].mapq \
+			and ordered_transcripts[-1][1].mapq > 7) or \
+			(not args.stringent and not args.trust_ends and ordered_transcripts[-1][1].mapq >= args.quality):
 			t = ordered_transcripts[-1][0]
 			if t not in counts:
 				counts[t] = 0
 			counts[t] += 1
+			if args.generate_map:
+				if t not in isoform_read:
+					isoform_read[t] = []
+				isoform_read[t] += [r]
 			continue
 
-		if not args.trust_ends:  # ignore multiple mappers
+		if not args.trust_ends and not args.stringent:  # multiple mapper, can't assign
 			continue
 
+		# read in cigar info for stringent/trust_ends modes into transcript_coverage dict
 		# {transcript: (sum_matches, unmapped_left, unmapped_right, softclip_left, softclip_right)}
 		transcript_coverage = {}
 		for t, t_info in ordered_transcripts:
-			cigar, pos = t_info['cigar'], t_info['startpos']
+
+			cigar, pos = t_info.cigar, t_info.startpos
+
 			relstart = 0
 			blocksizes, relblockstarts = [], []
 
 			matches = re.findall('([0-9]+)([A-Z])', cigar)
-
 			num, op = int(matches[0][0]), matches[0][1]
 			if op == 'H':  # check for H and then S at beginning of cigar 
 				matches = matches[1:]
@@ -135,9 +152,8 @@ def count_transcripts_for_reads(read_names):
 			blockstarts = [pos + s for s in relblockstarts]
 			read_left = blockstarts[0]
 			read_right = blockstarts[-1] + blocksizes[-1]
-
 			if args.stringent and is_stringent(t, blocksizes, blockstarts) \
-				or not args.stringent:
+				or args.trust_ends:
 				transcript_coverage[t] = (sum(blocksizes), read_left, \
 					transcript_lengths[t] - read_right, softclip_left, softclip_right)
 
@@ -158,7 +174,16 @@ def count_transcripts_for_reads(read_names):
 		if best_t not in counts:
 			counts[best_t] = 0
 		counts[best_t] += 1
-	return counts
+
+		if args.generate_map:
+			if best_t not in isoform_read:
+				isoform_read[best_t] = []
+			isoform_read[best_t] += [r]
+
+	if args.generate_map:
+		return counts, isoform_read
+	else:
+		return counts, None
 
 terminal_exons = {}  # first last exons of the firstpass flair reference transcriptome
 if args.stringent:
@@ -176,13 +201,14 @@ if args.stringent:
 		terminal_exons[name]['left_pos'] = left
 		terminal_exons[name]['right_pos'] = right
 
+aln = namedtuple('aln', 'cigar mapq startpos')
 transcript_lengths = {}
 reads = {}
 for line in sam:
 	if line.startswith('@'):
 		if line.startswith('@SQ'):
 			name = line[line.find('SN:') + 3:].split()[0]
-			length = int(line[line.find('LN:') + 3:].split()[0])
+			length = float(line[line.find('LN:') + 3:].split()[0])
 			transcript_lengths[name] = length
 		continue
 	line = line.rstrip().split('\t')
@@ -192,9 +218,7 @@ for line in sam:
 	if read not in reads:
 		reads[read] = {}
 	reads[read][transcript] = {}
-	reads[read][transcript]['cigar'] = cigar
-	reads[read][transcript]['quality'] = quality  # mapq
-	reads[read][transcript]['startpos'] = pos
+	reads[read][transcript] = aln(cigar=cigar, mapq=quality, startpos=pos)
 
 if __name__ == '__main__':
 
@@ -214,11 +238,28 @@ if __name__ == '__main__':
 	counts = p.map(count_transcripts_for_reads, grouped_reads)
 	p.terminate()
 
-	merged_counts = Counter(counts[0])
+	merged_counts = Counter(counts[0][0])
 	for res in counts[1:]:
-		merged_counts += Counter(res)
+		merged_counts += Counter(res[0])
+
 
 	with open(outfilename, 'wt') as outfile:
 		writer = csv.writer(outfile, delimiter='\t', lineterminator=os.linesep)
 		for t in merged_counts:
 			writer.writerow([t, merged_counts[t]])
+
+	if args.generate_map:
+		merged_map = {}
+		for res in counts:
+			for i in res[1]:
+				if i not in merged_map:
+					merged_map[i] = []
+				merged_map[i] += res[1][i]
+
+		with open(args.generate_map, 'wt') as outfile:
+			writer = csv.writer(outfile, delimiter='\t', lineterminator=os.linesep)
+			for i in merged_map:
+				writer.writerow([i, ','.join(merged_map[i])])
+
+
+

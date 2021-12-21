@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sys, csv, os
 
 try:
@@ -155,8 +156,8 @@ with open(outfilename, 'wt') as outfile:
 			else:
 				name_counts[name] += 1
 				name = name + '-' + str(name_counts[name])
-
-			newname = name + '_noReference'
+			noref = chrom + ':' + str(start)[:-3] + '000'
+			newname = name + noref
 			if isbed:
 				line[3] = newname
 			else:
@@ -194,7 +195,7 @@ with open(outfilename, 'wt') as outfile:
 			gene = chrom + ':' + str(start)[:-3] + '000'
 		else:  # gene name will be whichever gene the entry has more shared junctions with
 			genes = sorted(gene_hits.items(), key=lambda x: x[1])  # sort by number of junctions shared with gene
-			if len(genes) > 1 and len(genes) > 1 and genes[-1][1] == genes[-2][1]: # tie, break by gene size 
+			if len(genes) > 1 and genes[-1][1] == genes[-2][1]: # tie, break by gene size 
 				genes = sorted(genes, key=lambda x: x[0])
 				genes = sorted(genes, key=lambda x: x[1])
 				if not junctions:

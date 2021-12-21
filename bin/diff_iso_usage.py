@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import sys, csv, os
 import scipy.stats as sps
 
@@ -24,6 +26,27 @@ else:
 	sys.stderr.write('Could not find {} in {}\n'.format(colname2, ' '.join(header)))
 	sys.exit(1)
 
+def split_iso_gene(iso_gene):
+	if '_chr' in iso_gene:
+		iso = iso_gene[:iso_gene.rfind('_chr')]
+		gene = iso_gene[iso_gene.rfind('_chr')+1:]
+	elif '_XM' in iso_gene:
+		iso = iso_gene[:iso_gene.rfind('_XM')]
+		gene = iso_gene[iso_gene.rfind('_XM')+1:]
+	elif '_XR' in iso_gene:
+		iso = iso_gene[:iso_gene.rfind('_XR')]
+		gene = iso_gene[iso_gene.rfind('_XR')+1:]
+	elif '_NM' in iso_gene:
+		iso = iso_gene[:iso_gene.rfind('_NM')]
+		gene = iso_gene[iso_gene.rfind('_NM')+1:]
+	elif '_NR' in iso_gene:
+		iso = iso_gene[:iso_gene.rfind('_NR')]
+		gene = iso_gene[iso_gene.rfind('_NR')+1:]
+	else:
+		iso = iso_gene[:iso_gene.rfind('_')]
+		gene = iso_gene[iso_gene.rfind('_')+1:]
+	return iso, gene
+
 counts = {}
 for line in counts_matrix:
 	line = line.rstrip().split('\t')
@@ -32,12 +55,10 @@ for line in counts_matrix:
 		sys.stderr.write('Please run bin/identify_annotated_gene.py first so that isoforms\
 			can be grouped by their parent genes\n')
 		sys.exit(1)
-	iso = iso_gene[:iso_gene.rfind('_')]
-	gene = iso_gene[iso_gene.rfind('_')+1:]
+	iso, gene = split_iso_gene(iso_gene)
 	if gene not in counts:
 		counts[gene] = {}
-	if count1 != 0 and count2 != 0:
-		counts[gene][iso] = [count1, count2] 
+	counts[gene][iso] = [count1, count2] 
 
 with open(outfilename, 'wt') as outfile:
 	writer = csv.writer(outfile, delimiter='\t', lineterminator=os.linesep)
@@ -48,6 +69,8 @@ with open(outfilename, 'wt') as outfile:
 			thesecounts = counts[gene][iso]
 			othercounts = [0, 0]
 			ctable = [thesecounts, othercounts]
+			if thesecounts[0] == 0 or thesecounts[1] == 0:  # do not test this isoform
+				continue
 			for iso_ in counts[gene]:  # count up for all other isoforms of this gene
 				if iso_ == iso:
 					continue
